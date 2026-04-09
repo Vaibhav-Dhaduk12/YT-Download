@@ -28,9 +28,13 @@ def normalize_url(url: str) -> str:
 
 
 def get_platform_from_url(url: str) -> Optional[str]:
-    url_lower = url.lower()
-    if "youtube.com" in url_lower or "youtu.be" in url_lower:
+    try:
+        hostname = urlparse(url).hostname or ""
+        hostname = hostname.lower()
+    except Exception:
+        return None
+    if hostname in ("youtube.com", "www.youtube.com", "youtu.be", "m.youtube.com"):
         return "youtube"
-    if "instagram.com" in url_lower:
+    if hostname in ("instagram.com", "www.instagram.com"):
         return "instagram"
     return None
