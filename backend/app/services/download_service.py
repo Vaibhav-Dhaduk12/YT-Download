@@ -1,3 +1,4 @@
+import os
 import uuid
 from typing import Optional
 
@@ -58,6 +59,7 @@ class DownloadService:
                 quality=job.quality,
                 audio_only=job.audio_only,
                 progress_hook=progress_hook,
+                output_suffix=job.job_id,
             )
 
             job.file_path = result.get("filepath")
@@ -70,6 +72,14 @@ class DownloadService:
             job.status = "failed"
             job.error = str(e)
             logger.error("Download failed", job_id=job_id, error=str(e))
+            
+            # Attempt cleanup of failed download file
+            if job.file_path and os.path.exists(job.file_path):
+                try:
+                    os.remove(job.file_path)
+                    logger.info("Failed download file cleaned up", job_id=job_id, filepath=job.file_path)
+                except Exception as cleanup_err:
+                    logger.warning("Failed to cleanup download file", error=str(cleanup_err))
 
     async def get_job_status(self, job_id: str) -> Optional[dict]:
         job = self._jobs.get(job_id)

@@ -19,6 +19,7 @@ class PlatformAdapter(ABC):
         quality: str = "best",
         audio_only: bool = False,
         progress_hook: Optional[Callable[[dict], None]] = None,
+        output_suffix: Optional[str] = None,
     ) -> dict:
         """
         Download video/audio.

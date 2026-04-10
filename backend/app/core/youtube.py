@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import shutil
+import subprocess
 from typing import Any, Callable, Optional
 
 import structlog
@@ -18,7 +19,7 @@ settings = get_settings()
 
 
 class YouTubeAdapter(PlatformAdapter):
-    """YouTube platform adapter using yt-dlp."""
+    """YouTube platform adapter using yt-dlp with robust error handling."""
 
     def supports(self, url: str) -> bool:
         patterns = [
@@ -59,7 +60,7 @@ class YouTubeAdapter(PlatformAdapter):
             video_id=info.get("id", ""),
             title=info.get("title", "Unknown"),
             description=info.get("description"),
-            duration=info.get("duration"),
+            duration=self._normalize_duration(info.get("duration")),
             thumbnail=info.get("thumbnail"),
             uploader=info.get("uploader") or info.get("channel"),
             upload_date=info.get("upload_date"),
@@ -76,6 +77,7 @@ class YouTubeAdapter(PlatformAdapter):
         quality: str = "best",
         audio_only: bool = False,
         progress_hook: Optional[Callable[[dict], None]] = None,
+        output_suffix: Optional[str] = None,
     ) -> dict:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
@@ -86,6 +88,7 @@ class YouTubeAdapter(PlatformAdapter):
             quality,
             audio_only,
             progress_hook,
+            output_suffix,
         )
         return result
 
@@ -94,14 +97,12 @@ class YouTubeAdapter(PlatformAdapter):
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
-            # Avoid inheriting user/global yt-dlp config (e.g. forced -f) that can break metadata.
             "ignoreconfig": True,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 return ydl.extract_info(url, download=False) or {}
             except yt_dlp.utils.DownloadError as exc:
-                # Some videos can fail during format selection even for metadata calls.
                 if "Requested format is not available" not in str(exc):
                     raise
 
@@ -115,6 +116,7 @@ class YouTubeAdapter(PlatformAdapter):
         quality: str,
         audio_only: bool,
         progress_hook: Optional[Callable[[dict], None]],
+        output_suffix: Optional[str],
     ) -> dict:
         output_dir = os.path.abspath(settings.temp_dir)
         os.makedirs(output_dir, exist_ok=True)
@@ -124,10 +126,13 @@ class YouTubeAdapter(PlatformAdapter):
         if not ffmpeg_available:
             logger.warning("ffmpeg not found, using non-merge download formats", url=url)
 
-        output_template = os.path.join(output_dir, "%(id)s.%(ext)s")
+        template_name = "%(id)s.%(ext)s"
+        if output_suffix:
+            template_name = f"%(id)s-{output_suffix}.%(ext)s"
+        output_template = os.path.join(output_dir, template_name)
 
         last_error: Optional[Exception] = None
-        for fmt in candidates:
+        for attempt, fmt in enumerate(candidates):
             ydl_opts: dict = {
                 "format": fmt,
                 "outtmpl": output_template,
@@ -135,6 +140,7 @@ class YouTubeAdapter(PlatformAdapter):
                 "no_warnings": True,
                 "ignoreconfig": True,
                 "no_color": True,
+                "overwrites": True,
             }
 
             if audio_only and ffmpeg_available:
@@ -151,25 +157,87 @@ class YouTubeAdapter(PlatformAdapter):
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=True) or {}
                     filename = ydl.prepare_filename(info)
-                    if audio_only:
+                    
+                    if audio_only and ffmpeg_available:
                         base, _ = os.path.splitext(filename)
                         filename = f"{base}.mp3"
+
+                # Validate the output before returning
+                is_valid, error_msg = self._validate_output_file(filename)
+                if not is_valid:
+                    logger.warning("Output validation failed, retrying", 
+                                 format=fmt, attempt=attempt, error=error_msg, url=url)
+                    self._cleanup_partial_file(filename)
+                    last_error = DownloadError(error_msg)
+                    continue
+
+                output_ext = "mp3" if (audio_only and ffmpeg_available) else info.get("ext", "mp4")
 
                 return {
                     "filepath": filename,
                     "filename": os.path.basename(filename),
                     "title": info.get("title", "download"),
-                    "ext": info.get("ext", "mp4"),
+                    "ext": output_ext,
                 }
+
             except yt_dlp.utils.DownloadError as exc:
+                exc_str = str(exc)
                 last_error = exc
-                if "Requested format is not available" in str(exc):
-                    logger.warning("Requested format unavailable, retrying", format=fmt, url=url)
+                
+                logger.warning("Download attempt failed", attempt=attempt, format=fmt, 
+                             error=exc_str[:100], url=url)
+                
+                # Handle specific error types
+                if "Requested format is not available" in exc_str:
+                    logger.info("Trying next format candidate", format=fmt)
+                    # Attempt cleanup of any partial file
+                    try:
+                        partial = os.path.join(output_dir, f"{info.get('id', 'unknown')}.partial")
+                        self._cleanup_partial_file(partial)
+                    except Exception:
+                        pass
                     continue
-                if "ffmpeg is not installed" in str(exc):
-                    logger.warning("ffmpeg unavailable for selected format, retrying", format=fmt, url=url)
+                    
+                elif "ffmpeg is not installed" in exc_str or "ffmpeg" in exc_str.lower():
+                    logger.info("ffmpeg unavailable for this format, trying next candidate")
                     continue
-                raise DownloadError(self._clean_error(str(exc))) from exc
+                    
+                elif "postprocessor" in exc_str.lower() or "mux" in exc_str.lower() or "merge" in exc_str.lower():
+                    logger.warning("Postprocessor/mux error encountered, adding audio-only fallback")
+                    # For merge/postprocessor errors, add audio-only to candidates if not there
+                    if not audio_only and "bestaudio" not in fmt:
+                        # Add audio-only format to next attempt
+                        candidates.append("bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio")
+                    continue
+                    
+                else:
+                    # For unexpected errors, raise immediately
+                    raise DownloadError(self._clean_error(exc_str)) from exc
+
+            except Exception as exc:
+                # Catch any other exceptions (postprocessor, IO, etc.)
+                exc_str = str(exc)
+                logger.warning("Unexpected error during download", attempt=attempt, 
+                             format=fmt, error=exc_str[:100])
+                last_error = exc
+                
+                # Attempt cleanup of partial files
+                try:
+                    for file in os.listdir(output_dir):
+                        if ".part" in file or ".info" in file:
+                            self._cleanup_partial_file(os.path.join(output_dir, file))
+                except Exception:
+                    pass
+                
+                # If this looks like a postprocessor error, try next candidate
+                if "postprocessor" in exc_str.lower() or "mux" in exc_str.lower():
+                    continue
+                
+                # Otherwise keep trying other candidates
+                if attempt < len(candidates) - 1:
+                    continue
+                else:
+                    raise DownloadError(self._clean_error(exc_str)) from exc
 
         if last_error:
             raise DownloadError(self._clean_error(str(last_error))) from last_error
@@ -193,19 +261,19 @@ class YouTubeAdapter(PlatformAdapter):
                 candidates = [format_id, "bestvideo+bestaudio/best", "best"]
             else:
                 if "+" in format_id:
-                    candidates = [format_id.split("+")[0], "best[ext=mp4]/best", "best"]
+                    candidates = ["best[ext=mp4][acodec!=none]/best[acodec!=none]/best"]
                 else:
-                    candidates = [format_id, "best[ext=mp4]/best", "best"]
+                    candidates = [format_id, "best[ext=mp4][acodec!=none]/best[acodec!=none]/best"]
         elif quality == "best":
             if ffmpeg_available:
                 candidates = ["bestvideo+bestaudio/best", "best"]
             else:
-                candidates = ["best[ext=mp4]/best"]
+                candidates = ["best[ext=mp4][acodec!=none]/best[acodec!=none]/best"]
         elif quality == "worst":
             if ffmpeg_available:
                 candidates = ["worstvideo+worstaudio/worst", "worst"]
             else:
-                candidates = ["worst[ext=mp4]/worst"]
+                candidates = ["worst[ext=mp4][acodec!=none]/worst[acodec!=none]/best[acodec!=none]/best"]
         else:
             if ffmpeg_available:
                 candidates = [
@@ -215,15 +283,76 @@ class YouTubeAdapter(PlatformAdapter):
                 ]
             else:
                 candidates = [
-                    f"best[height<={quality}][ext=mp4]/best[height<={quality}]/best[ext=mp4]/best",
+                    f"best[height<={quality}][ext=mp4][acodec!=none]/best[height<={quality}][acodec!=none]/best[ext=mp4][acodec!=none]/best[acodec!=none]/best",
                 ]
 
-        # Preserve order while de-duplicating.
         return list(dict.fromkeys(candidates))
+
+    def _validate_output_file(self, filepath: str, min_size_kb: int = 100) -> tuple[bool, str]:
+        """
+        Validate that downloaded file exists and has reasonable size and structure.
+        Returns: (is_valid, error_message)
+        """
+        if not os.path.exists(filepath):
+            return False, "Output file not created"
+        
+        try:
+            file_size = os.path.getsize(filepath)
+            min_bytes = min_size_kb * 1024
+            
+            if file_size < min_bytes:
+                return False, f"File too small ({file_size} bytes, expected at least {min_bytes} bytes)"
+            
+            # Try ffprobe validation if available (checks container/codecs)
+            if shutil.which("ffprobe"):
+                try:
+                    result = subprocess.run(
+                        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", 
+                         "-of", "default=noprint_wrappers=1", filepath],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    
+                    if result.returncode != 0:
+                        logger.warning("ffprobe check failed with non-zero return", 
+                                     filepath=filepath, returncode=result.returncode)
+                        return False, "Container validation failed"
+                    
+                    if "codec_type=" not in result.stdout:
+                        return False, "No valid streams in output (possibly corrupted)"
+                    
+                except subprocess.TimeoutExpired:
+                    logger.warning("ffprobe validation timeout", filepath=filepath)
+                    # Too slow but file might be OK, don't fail here
+                except Exception as e:
+                    logger.debug("ffprobe validation error (continuing anyway)", 
+                               filepath=filepath, error=str(e))
+            
+            return True, ""
+            
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+
+    def _cleanup_partial_file(self, filepath: str) -> None:
+        """Safely delete a partial or failed download."""
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                logger.debug("Partial file cleaned up", filepath=filepath)
+        except Exception as e:
+            logger.warning("Failed to cleanup partial file", filepath=filepath, error=str(e))
 
     def _has_ffmpeg(self) -> bool:
         return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
     def _clean_error(self, message: str) -> str:
-        # Strip ANSI escapes so frontend displays readable errors.
         return re.sub(r"\x1b\[[0-9;]*m", "", message)
+
+    def _normalize_duration(self, duration: Any) -> Optional[int]:
+        if duration is None:
+            return None
+        try:
+            return int(round(float(duration)))
+        except (TypeError, ValueError):
+            return None

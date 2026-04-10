@@ -15,12 +15,37 @@ import { FooterComponent } from './shared/footer/footer.component';
     <app-footer></app-footer>
   `,
   styles: [`
+    :host {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      background: linear-gradient(135deg, var(--claude-parchment) 0%, #f8f7f0 100%);
+    }
+
     .main-content {
-      min-height: calc(100vh - 120px);
-      padding-top: 1rem;
+      flex: 1;
+      padding: 2rem 0;
+      animation: fadeIn 0.6s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 768px) {
+      .main-content {
+        padding: 1rem 0;
+      }
     }
   `],
 })
 export class AppComponent {
-  title = 'YT Download';
+  title = 'YT Download Studio';
 }
