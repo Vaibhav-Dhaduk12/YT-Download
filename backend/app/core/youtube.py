@@ -1,11 +1,13 @@
 import asyncio
 import os
 import re
+import shutil
 from typing import Any, Callable, Optional
 
 import structlog
 import yt_dlp
 
+from app.api.exceptions.custom import DownloadError
 from app.config import get_settings
 from app.core.base import PlatformAdapter
 from app.schemas.format import FormatInfo
@@ -92,9 +94,19 @@ class YouTubeAdapter(PlatformAdapter):
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
+            # Avoid inheriting user/global yt-dlp config (e.g. forced -f) that can break metadata.
+            "ignoreconfig": True,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(url, download=False) or {}
+            try:
+                return ydl.extract_info(url, download=False) or {}
+            except yt_dlp.utils.DownloadError as exc:
+                # Some videos can fail during format selection even for metadata calls.
+                if "Requested format is not available" not in str(exc):
+                    raise
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return ydl.extract_info(url, download=False, process=False) or {}
 
     def _do_download(
         self,
@@ -107,46 +119,111 @@ class YouTubeAdapter(PlatformAdapter):
         output_dir = os.path.abspath(settings.temp_dir)
         os.makedirs(output_dir, exist_ok=True)
 
-        if audio_only:
-            fmt = "bestaudio/best"
-        elif format_id:
-            fmt = format_id
-        elif quality == "best":
-            fmt = "bestvideo+bestaudio/best"
-        elif quality == "worst":
-            fmt = "worstvideo+worstaudio/worst"
-        else:
-            fmt = f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]"
+        ffmpeg_available = self._has_ffmpeg()
+        candidates = self._build_format_candidates(format_id, quality, audio_only, ffmpeg_available)
+        if not ffmpeg_available:
+            logger.warning("ffmpeg not found, using non-merge download formats", url=url)
 
         output_template = os.path.join(output_dir, "%(id)s.%(ext)s")
 
-        ydl_opts: dict = {
-            "format": fmt,
-            "outtmpl": output_template,
-            "quiet": False,
-            "no_warnings": True,
-        }
+        last_error: Optional[Exception] = None
+        for fmt in candidates:
+            ydl_opts: dict = {
+                "format": fmt,
+                "outtmpl": output_template,
+                "quiet": False,
+                "no_warnings": True,
+                "ignoreconfig": True,
+                "no_color": True,
+            }
 
+            if audio_only and ffmpeg_available:
+                ydl_opts["postprocessors"] = [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }]
+
+            if progress_hook:
+                ydl_opts["progress_hooks"] = [progress_hook]
+
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True) or {}
+                    filename = ydl.prepare_filename(info)
+                    if audio_only:
+                        base, _ = os.path.splitext(filename)
+                        filename = f"{base}.mp3"
+
+                return {
+                    "filepath": filename,
+                    "filename": os.path.basename(filename),
+                    "title": info.get("title", "download"),
+                    "ext": info.get("ext", "mp4"),
+                }
+            except yt_dlp.utils.DownloadError as exc:
+                last_error = exc
+                if "Requested format is not available" in str(exc):
+                    logger.warning("Requested format unavailable, retrying", format=fmt, url=url)
+                    continue
+                if "ffmpeg is not installed" in str(exc):
+                    logger.warning("ffmpeg unavailable for selected format, retrying", format=fmt, url=url)
+                    continue
+                raise DownloadError(self._clean_error(str(exc))) from exc
+
+        if last_error:
+            raise DownloadError(self._clean_error(str(last_error))) from last_error
+        raise DownloadError("Download failed: no valid format found")
+
+    def _build_format_candidates(
+        self,
+        format_id: Optional[str],
+        quality: str,
+        audio_only: bool,
+        ffmpeg_available: bool,
+    ) -> list[str]:
+        candidates: list[str] = []
         if audio_only:
-            ydl_opts["postprocessors"] = [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }]
+            if ffmpeg_available:
+                candidates = ["bestaudio/best", "best"]
+            else:
+                candidates = ["bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio", "best"]
+        elif format_id:
+            if ffmpeg_available:
+                candidates = [format_id, "bestvideo+bestaudio/best", "best"]
+            else:
+                if "+" in format_id:
+                    candidates = [format_id.split("+")[0], "best[ext=mp4]/best", "best"]
+                else:
+                    candidates = [format_id, "best[ext=mp4]/best", "best"]
+        elif quality == "best":
+            if ffmpeg_available:
+                candidates = ["bestvideo+bestaudio/best", "best"]
+            else:
+                candidates = ["best[ext=mp4]/best"]
+        elif quality == "worst":
+            if ffmpeg_available:
+                candidates = ["worstvideo+worstaudio/worst", "worst"]
+            else:
+                candidates = ["worst[ext=mp4]/worst"]
+        else:
+            if ffmpeg_available:
+                candidates = [
+                    f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]",
+                    "bestvideo+bestaudio/best",
+                    "best",
+                ]
+            else:
+                candidates = [
+                    f"best[height<={quality}][ext=mp4]/best[height<={quality}]/best[ext=mp4]/best",
+                ]
 
-        if progress_hook:
-            ydl_opts["progress_hooks"] = [progress_hook]
+        # Preserve order while de-duplicating.
+        return list(dict.fromkeys(candidates))
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True) or {}
-            filename = ydl.prepare_filename(info)
-            if audio_only:
-                base, _ = os.path.splitext(filename)
-                filename = f"{base}.mp3"
+    def _has_ffmpeg(self) -> bool:
+        return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
-        return {
-            "filepath": filename,
-            "filename": os.path.basename(filename),
-            "title": info.get("title", "download"),
-            "ext": info.get("ext", "mp4"),
-        }
+    def _clean_error(self, message: str) -> str:
+        # Strip ANSI escapes so frontend displays readable errors.
+        return re.sub(r"\x1b\[[0-9;]*m", "", message)

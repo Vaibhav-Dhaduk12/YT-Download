@@ -1,15 +1,13 @@
 import structlog
 from fastapi import APIRouter, HTTPException, Request
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.api.exceptions.custom import InvalidURLError, PlatformNotSupportedError
+from app.core.rate_limiter import limiter
 from app.schemas.metadata import MetadataRequest, MetadataResponse
 from app.services.metadata_service import MetadataService
 
 router = APIRouter()
 logger = structlog.get_logger()
-limiter = Limiter(key_func=get_remote_address)
 metadata_service = MetadataService()
 
 

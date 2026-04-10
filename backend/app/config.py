@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     workers: int = 1
 
     # CORS
-    allowed_origins: List[str] = ["http://localhost:4200", "http://localhost:3000"]
+    allowed_origins: str = "http://localhost:4200,http://localhost:3000"
 
     # Redis
     redis_url: str = "redis://localhost:6379"
@@ -42,6 +42,18 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"
+
+    @property
+    def allowed_origins_list(self) -> List[str]:
+        value = self.allowed_origins.strip()
+        if value.startswith("[") and value.endswith("]"):
+            # Accept JSON-style arrays for compatibility with existing env setups.
+            import json
+
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return [str(origin).strip() for origin in parsed if str(origin).strip()]
+        return [origin.strip() for origin in value.split(",") if origin.strip()]
 
 
 @lru_cache

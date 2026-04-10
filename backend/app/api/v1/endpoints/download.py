@@ -1,16 +1,14 @@
 import structlog
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.api.exceptions.custom import InvalidURLError, PlatformNotSupportedError
+from app.core.rate_limiter import limiter
 from app.schemas.download import DownloadRequest, DownloadResponse
 from app.services.download_service import DownloadService
 
 router = APIRouter()
 logger = structlog.get_logger()
-limiter = Limiter(key_func=get_remote_address)
 download_service = DownloadService()
 
 

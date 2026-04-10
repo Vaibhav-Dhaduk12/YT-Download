@@ -76,6 +76,7 @@ class InstagramAdapter(PlatformAdapter):
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
+            "ignoreconfig": True,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(url, download=False) or {}
@@ -96,6 +97,7 @@ class InstagramAdapter(PlatformAdapter):
             "outtmpl": output_template,
             "quiet": False,
             "no_warnings": True,
+            "ignoreconfig": True,
         }
 
         if progress_hook:

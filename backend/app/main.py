@@ -6,7 +6,6 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from slowapi import _rate_limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -16,6 +15,7 @@ from app.api.exceptions.handlers import (
 )
 from app.api.v1.api import api_router
 from app.config import get_settings
+from app.core.rate_limiter import limiter
 from app.infrastructure.tools.health_check import check_tools
 
 logger = structlog.get_logger()
@@ -45,14 +45,14 @@ def create_app() -> FastAPI:
     )
 
     # Rate limiter
-    app.state.limiter = _rate_limiter
+    app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, generic_exception_handler)  # type: ignore[arg-type]
 
     # Middlewares
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.allowed_origins,
+        allow_origins=settings.allowed_origins_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
