@@ -27,6 +27,8 @@ class MetadataService:
         adapter = get_platform_adapter(platform)
         try:
             metadata = await adapter.get_metadata(url)
+        except MetadataFetchError:
+            raise
         except Exception as exc:
             message = str(exc)
             lowered = message.lower()

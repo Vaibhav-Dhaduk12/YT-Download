@@ -10,7 +10,7 @@ from typing import Any, Callable, Optional
 import structlog
 import yt_dlp
 
-from app.api.exceptions.custom import DownloadError
+from app.api.exceptions.custom import DownloadError, MetadataFetchError
 from app.config import get_settings
 from app.core.base import PlatformAdapter
 from app.infrastructure.tools.health_check import is_tool_available, resolve_tool_path
@@ -111,21 +111,21 @@ class YouTubeAdapter(PlatformAdapter):
         cookiefile = self._cookiefile_path()
         if cookiefile:
             ydl_opts["cookiefile"] = cookiefile
+        last_exc: Optional[Exception] = None
 
         # 1) Preferred full extraction path.
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 return ydl.extract_info(url, download=False) or {}
             except yt_dlp.utils.DownloadError as exc:
-                if "Requested format is not available" not in str(exc):
-                    raise
+                last_exc = exc
 
         # 2) Retry with processing disabled to avoid strict format resolution.
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 return ydl.extract_info(url, download=False, process=False) or {}
-            except yt_dlp.utils.DownloadError:
-                pass
+            except yt_dlp.utils.DownloadError as exc:
+                last_exc = exc
 
         # 3) Last fallback: ignore format availability errors and use a broader
         #    client combination that tends to work better on some hosted IPs.
@@ -139,7 +139,31 @@ class YouTubeAdapter(PlatformAdapter):
             },
         }
         with yt_dlp.YoutubeDL(fallback_opts) as ydl:
-            return ydl.extract_info(url, download=False, process=False) or {}
+            try:
+                return ydl.extract_info(url, download=False, process=False) or {}
+            except yt_dlp.utils.DownloadError as exc:
+                last_exc = exc
+
+        if last_exc is not None:
+            raise MetadataFetchError(self._map_metadata_error(str(last_exc))) from last_exc
+
+        raise MetadataFetchError("Unable to fetch metadata for this URL.")
+
+    def _map_metadata_error(self, message: str) -> str:
+        lowered = message.lower()
+        if "sign in to confirm" in lowered and "not a bot" in lowered:
+            return (
+                "YouTube is blocking metadata retrieval for this video from server IP "
+                "(anti-bot challenge). Please try another video, try again later, or use "
+                "a backend setup with YouTube cookies configured for yt-dlp."
+            )
+        if "requested format is not available" in lowered:
+            return (
+                "YouTube did not return usable formats for this video from the current "
+                "backend environment. Try again later, try another video, or use an "
+                "authenticated cookie setup for yt-dlp."
+            )
+        return "Unable to fetch metadata for this URL."
 
     def _do_download(
         self,
