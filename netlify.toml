@@ -1,0 +1,15 @@
+[build]
+  base = "frontend"
+  command = "npm run build -- --configuration production"
+  publish = "dist/yt-download-frontend/browser"
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://yt-download-t7cu.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
