@@ -1,7 +1,11 @@
 import structlog
 from fastapi import APIRouter, HTTPException, Request
 
-from app.api.exceptions.custom import InvalidURLError, PlatformNotSupportedError
+from app.api.exceptions.custom import (
+    InvalidURLError,
+    MetadataFetchError,
+    PlatformNotSupportedError,
+)
 from app.core.rate_limiter import limiter
 from app.schemas.metadata import MetadataRequest, MetadataResponse
 from app.services.metadata_service import MetadataService
@@ -22,6 +26,9 @@ async def get_metadata(
     except InvalidURLError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except PlatformNotSupportedError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except MetadataFetchError as e:
+        logger.warning("Metadata fetch blocked", url=payload.url, reason=str(e))
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error("Metadata fetch failed", url=payload.url, error=str(e))

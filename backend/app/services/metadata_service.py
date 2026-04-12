@@ -3,6 +3,7 @@ from typing import Optional
 
 import structlog
 
+from app.api.exceptions.custom import MetadataFetchError
 from app.core.factory import get_platform_adapter
 from app.schemas.metadata import MetadataResponse
 from app.services.validation_service import ValidationService
@@ -24,7 +25,20 @@ class MetadataService:
             return self._cache[url]
 
         adapter = get_platform_adapter(platform)
-        metadata = await adapter.get_metadata(url)
+        try:
+            metadata = await adapter.get_metadata(url)
+        except Exception as exc:
+            message = str(exc)
+            lowered = message.lower()
+
+            if "sign in to confirm" in lowered and "not a bot" in lowered:
+                raise MetadataFetchError(
+                    "YouTube is blocking metadata retrieval for this video from server IP "
+                    "(anti-bot challenge). Please try another video, try again later, or use "
+                    "a backend setup with YouTube cookies configured for yt-dlp."
+                ) from exc
+
+            raise MetadataFetchError("Unable to fetch metadata for this URL.") from exc
 
         self._cache[url] = metadata
         return metadata
