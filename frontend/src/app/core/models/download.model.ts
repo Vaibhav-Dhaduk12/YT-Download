@@ -2,7 +2,7 @@ export interface DownloadRequest {
   url: string;
   format_id?: string;
   quality?: string;
-  audio_only?: boolean;
+  audio_only: boolean;
   subtitles?: boolean;
 }
 

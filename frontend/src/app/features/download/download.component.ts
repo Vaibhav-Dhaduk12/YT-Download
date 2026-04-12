@@ -72,6 +72,10 @@ import { UrlInputComponent } from '../../shared/url-input/url-input.component';
           <!-- Quality & Format Selection -->
           <div class="download-options">
             <h3 class="options-title">Quality Options</h3>
+
+            <div *ngIf="mergeWarning" class="quality-help-text">
+              {{ mergeWarning }}
+            </div>
             
             <div class="option-type">
               <label class="checkbox-label">
@@ -80,7 +84,7 @@ import { UrlInputComponent } from '../../shared/url-input/url-input.component';
               </label>
             </div>
 
-            <div *ngIf="!audioOnly && metadata.formats.length > 0" class="quality-selector">
+            <div *ngIf="canSelectSpecificFormat() && getVideoFormats().length > 0" class="quality-selector">
               <label class="quality-label">Video Quality:</label>
               <select [(ngModel)]="selectedFormatId" class="quality-select">
                 <option value="">🎯 Best Available</option>
@@ -93,6 +97,14 @@ import { UrlInputComponent } from '../../shared/url-input/url-input.component';
                   {{ fmt.filesize ? '~ ' + formatFileSize(fmt.filesize) : '' }}
                 </option>
               </select>
+            </div>
+
+            <div *ngIf="!audioOnly && !isMergeCapable" class="quality-help-text">
+              Advanced format selection is disabled because FFmpeg + FFprobe are not available.
+            </div>
+
+            <div *ngIf="audioOnly" class="quality-help-text">
+              Audio-only mode ignores video quality and downloads the best available audio.
             </div>
 
             <button
@@ -556,8 +568,10 @@ export class DownloadComponent implements OnInit, OnDestroy {
   isLoadingMetadata = false;
   metadataError = '';
 
-  selectedFormatId = '';
-  audioOnly = false;
+  selectedFormatId: string = '';
+  audioOnly: boolean = false;
+  isMergeCapable: boolean = true;
+  mergeWarning = '';
 
   currentJob: DownloadJob | null = null;
   isDownloading = false;
@@ -570,6 +584,8 @@ export class DownloadComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    this.refreshToolStatus();
+
     this.route.queryParams.subscribe((params) => {
       if (params['url']) {
         this.currentUrl = params['url'];
@@ -592,10 +608,14 @@ export class DownloadComponent implements OnInit, OnDestroy {
     this.metadataError = '';
     this.metadata = null;
     this.currentJob = null;
+    this.selectedFormatId = '';
+    this.audioOnly = false;
+    this.refreshToolStatus();
 
     this.apiService.getMetadata(url).subscribe({
       next: (data) => {
         this.metadata = data;
+        this.ensureSelectedFormatId();
         this.isLoadingMetadata = false;
       },
       error: (err) => {
@@ -609,15 +629,25 @@ export class DownloadComponent implements OnInit, OnDestroy {
   startDownload(): void {
     if (!this.currentUrl || this.isDownloading) return;
 
+    const canUseFormatSelection = !this.audioOnly && this.isMergeCapable;
+    const resolvedFormatId =
+      canUseFormatSelection && this.selectedFormatId.trim()
+        ? this.selectedFormatId
+        : undefined;
+    if (!canUseFormatSelection) {
+      this.selectedFormatId = '';
+    }
+    const resolvedQuality = !resolvedFormatId && !this.audioOnly ? 'best' : undefined;
+
     this.isDownloading = true;
     this.currentJob = null;
 
     this.apiService
       .startDownload({
         url: this.currentUrl,
-        format_id: this.selectedFormatId || undefined,
+        format_id: resolvedFormatId,
         audio_only: this.audioOnly,
-        quality: 'best',
+        quality: resolvedQuality,
       })
       .subscribe({
         next: (response) => {
@@ -659,9 +689,72 @@ export class DownloadComponent implements OnInit, OnDestroy {
 
   getVideoFormats(): VideoFormat[] {
     if (!this.metadata) return [];
-    return this.metadata.formats.filter(
-      (f) => f.vcodec && f.vcodec !== 'none' && f.resolution,
+
+    const videoFormats = this.metadata.formats.filter(
+      (f) => f.format_id && f.vcodec && f.vcodec !== 'none' && f.resolution,
     );
+    const mergeCompatibleFormats = this.isMergeCapable
+      ? videoFormats
+      : videoFormats.filter((f) => !!f.acodec && f.acodec !== 'none');
+
+    const preferredFormats =
+      mergeCompatibleFormats.filter((f) => f.ext === 'mp4').length > 0
+        ? mergeCompatibleFormats.filter((f) => f.ext === 'mp4')
+        : mergeCompatibleFormats;
+
+    const uniqueFormats = new Map<number, VideoFormat>();
+    for (const fmt of preferredFormats) {
+      const rank = this.getResolutionRank(fmt);
+      if (rank > 0 && !uniqueFormats.has(rank)) {
+        uniqueFormats.set(rank, fmt);
+      }
+    }
+
+    return Array.from(uniqueFormats.values()).sort((a, b) => this.getResolutionRank(b) - this.getResolutionRank(a));
+  }
+
+  canSelectSpecificFormat(): boolean {
+    return !this.audioOnly && this.isMergeCapable;
+  }
+
+  private refreshToolStatus(): void {
+    this.apiService.healthCheck().subscribe({
+      next: (health) => {
+        const ffmpegReady = !!health.tools?.ffmpeg;
+        const ffprobeReady = !!health.tools?.ffprobe;
+        this.isMergeCapable = ffmpegReady && ffprobeReady;
+        this.mergeWarning = this.isMergeCapable
+          ? ''
+          : 'FFmpeg + FFprobe are missing on the backend. Install both tools to enable high-quality video+audio format selection.';
+        this.ensureSelectedFormatId();
+      },
+      error: () => {
+        this.isMergeCapable = false;
+        this.mergeWarning =
+          'Unable to verify FFmpeg/FFprobe availability. Advanced format selection is disabled for safe video+audio downloads.';
+        this.ensureSelectedFormatId();
+      },
+    });
+  }
+
+  private ensureSelectedFormatId(): void {
+    if (!this.selectedFormatId.trim()) return;
+
+    const availableIds = new Set(this.getVideoFormats().map((f) => f.format_id));
+    if (!availableIds.has(this.selectedFormatId)) {
+      this.selectedFormatId = '';
+    }
+  }
+
+  private getResolutionRank(format: VideoFormat): number {
+    const resolution = format.resolution || '';
+    const byHeight = resolution.match(/(\d{3,4})p/i);
+    if (byHeight) return Number(byHeight[1]);
+
+    const byDimensions = resolution.match(/(\d{3,4})x(\d{3,4})/i);
+    if (byDimensions) return Number(byDimensions[2]);
+
+    return 0;
   }
 
   formatDuration(seconds: number): string {

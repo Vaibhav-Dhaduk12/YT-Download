@@ -11,6 +11,7 @@ import yt_dlp
 from app.api.exceptions.custom import DownloadError
 from app.config import get_settings
 from app.core.base import PlatformAdapter
+from app.infrastructure.tools.health_check import resolve_tool_path
 from app.schemas.metadata import MetadataResponse
 
 logger = structlog.get_logger()
@@ -189,10 +190,11 @@ class InstagramAdapter(PlatformAdapter):
                 return False, f"File incomplete ({file_size} bytes < {min_bytes})"
             
             # Try ffprobe if available
-            if shutil.which("ffprobe"):
+            ffprobe_path = resolve_tool_path("ffprobe")
+            if ffprobe_path:
                 try:
                     result = subprocess.run(
-                        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", 
+                        [ffprobe_path, "-v", "error", "-show_entries", "stream=codec_type", 
                          "-of", "default=noprint_wrappers=1", filepath],
                         capture_output=True, text=True, timeout=5
                     )

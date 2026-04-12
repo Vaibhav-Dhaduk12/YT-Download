@@ -6,6 +6,15 @@
 - Node.js 18+
 - Poetry (`pip install poetry`)
 - Angular CLI (`npm install -g @angular/cli`)
+- FFmpeg + FFprobe on PATH (required for high-quality video+audio merges)
+
+### FFmpeg setup (Windows)
+
+```bash
+winget install Gyan.FFmpeg
+ffmpeg -version
+ffprobe -version
+```
 
 ## Backend Setup
 
@@ -24,6 +33,7 @@ poetry run uvicorn app.main:app --reload --port 8000
 
 API will be at http://localhost:8000
 Swagger docs at http://localhost:8000/docs
+Health/tools status at http://localhost:8000/api/v1/health
 
 ## Frontend Setup
 

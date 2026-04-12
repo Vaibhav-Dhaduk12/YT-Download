@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     temp_dir: str = "./temp"
     max_file_size_mb: int = 500
     download_timeout: int = 300
+    ffmpeg_path: str = ""
+    ffprobe_path: str = ""
 
     # Logging
     log_level: str = "INFO"

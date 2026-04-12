@@ -10,7 +10,14 @@ A full-stack media downloader built with **FastAPI** (Python) and **Angular 17**
 - Python 3.11+
 - Node.js 18+
 - Docker & Docker Compose (optional)
-- FFmpeg (auto-downloaded by setup script)
+- FFmpeg + FFprobe (must be installed and available on PATH for high-quality video+audio merges)
+
+#### FFmpeg setup (Windows)
+```bash
+winget install Gyan.FFmpeg
+ffmpeg -version
+ffprobe -version
+```
 
 ### Option 1: Docker Compose (Recommended)
 ```bash

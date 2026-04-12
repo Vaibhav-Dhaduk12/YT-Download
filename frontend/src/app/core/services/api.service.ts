@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { VideoMetadata } from '../models/metadata.model';
 import { DownloadRequest, DownloadResponse, DownloadJob, DownloadHistoryItem } from '../models/download.model';
+import { HealthResponse } from '../models/health.model';
 
 @Injectable({
   providedIn: 'root',
@@ -36,7 +37,7 @@ export class ApiService {
     return this.http.delete<{ message: string }>(`${this.baseUrl}/history`);
   }
 
-  healthCheck(): Observable<{ status: string; version: string }> {
-    return this.http.get<{ status: string; version: string }>(`${this.baseUrl}/health`);
+  healthCheck(): Observable<HealthResponse> {
+    return this.http.get<HealthResponse>(`${this.baseUrl}/health`);
   }
 }

@@ -1,5 +1,6 @@
 import pytest
 
+from app.api.exceptions.custom import DownloadError
 from app.core.youtube import YouTubeAdapter
 
 
@@ -20,10 +21,10 @@ def test_format_id_ffmpeg_first_candidate_merges_audio(adapter):
     candidates = adapter._build_format_candidates(
         format_id="137", quality="best", audio_only=False, ffmpeg_available=True
     )
-    assert "+bestaudio" in candidates[0], (
+    assert "+bestaudio[ext=m4a]" in candidates[0], (
         "First candidate must force audio merge, got: " + candidates[0]
     )
-    assert candidates[0] == "137+bestaudio/best"
+    assert candidates[0] == "137+bestaudio[ext=m4a]/bestaudio/best"
 
 
 def test_format_id_ffmpeg_fallback_candidates_present(adapter):
@@ -32,7 +33,7 @@ def test_format_id_ffmpeg_fallback_candidates_present(adapter):
     candidates = adapter._build_format_candidates(
         format_id="248", quality="best", audio_only=False, ffmpeg_available=True
     )
-    assert "bestvideo+bestaudio/best" in candidates
+    assert "bestvideo+bestaudio[ext=m4a]/bestaudio/best" in candidates
     assert "best" in candidates
 
 
@@ -56,7 +57,7 @@ def test_format_id_no_ffmpeg_uses_progressive_format(adapter):
         format_id="137", quality="best", audio_only=False, ffmpeg_available=False
     )
     # All candidates must require audio track (no video-only streams).
-    assert all("acodec!=none" in c for c in candidates), (
+    assert all(("acodec!=none" in c) or ("acodec^=mp4a" in c) for c in candidates), (
         "All candidates must require audio when ffmpeg is unavailable"
     )
     # The bare video-only format_id must not appear on its own in any candidate.
@@ -94,14 +95,14 @@ def test_quality_best_ffmpeg(adapter):
     candidates = adapter._build_format_candidates(
         format_id=None, quality="best", audio_only=False, ffmpeg_available=True
     )
-    assert "bestvideo+bestaudio/best" in candidates
+    assert "bestvideo+bestaudio[ext=m4a]/bestaudio/best" in candidates
 
 
 def test_quality_worst_ffmpeg(adapter):
     candidates = adapter._build_format_candidates(
         format_id=None, quality="worst", audio_only=False, ffmpeg_available=True
     )
-    assert "worstvideo+worstaudio/worst" in candidates
+    assert "worstvideo+worstaudio[ext=m4a]/worstaudio/worst" in candidates
 
 
 def test_quality_height_ffmpeg(adapter):
@@ -109,3 +110,46 @@ def test_quality_height_ffmpeg(adapter):
         format_id=None, quality="720", audio_only=False, ffmpeg_available=True
     )
     assert any("720" in c for c in candidates)
+
+
+def test_format_id_without_ffmpeg_fails_fast(adapter, monkeypatch, tmp_path):
+    monkeypatch.setattr("app.core.youtube.settings.temp_dir", str(tmp_path))
+    monkeypatch.setattr(adapter, "_has_ffmpeg", lambda: False)
+
+    with pytest.raises(DownloadError) as exc:
+        adapter._do_download(
+            url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            format_id="137",
+            quality="best",
+            audio_only=False,
+            progress_hook=None,
+            output_suffix="unit-test",
+        )
+
+    error_text = str(exc.value)
+    assert "FFmpeg + FFprobe" in error_text
+    assert "winget install Gyan.FFmpeg" in error_text
+
+
+def test_validate_output_rejects_video_without_audio(adapter, monkeypatch):
+    monkeypatch.setattr("app.core.youtube.os.path.exists", lambda _: True)
+    monkeypatch.setattr("app.core.youtube.os.path.getsize", lambda _: 250 * 1024)
+    monkeypatch.setattr(
+        "app.core.youtube.shutil.which",
+        lambda command: "ffprobe" if command == "ffprobe" else None,
+    )
+
+    class Result:
+        returncode = 0
+        stdout = "codec_type=video\n"
+        stderr = ""
+
+    monkeypatch.setattr("app.core.youtube.subprocess.run", lambda *args, **kwargs: Result())
+
+    is_valid, error_msg = adapter._validate_output_file(
+        "fake.mp4",
+        require_video_stream=True,
+        require_audio_stream=True,
+    )
+    assert is_valid is False
+    assert "audio" in error_msg.lower()

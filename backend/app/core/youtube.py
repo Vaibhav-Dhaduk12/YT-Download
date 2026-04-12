@@ -11,6 +11,7 @@ import yt_dlp
 from app.api.exceptions.custom import DownloadError
 from app.config import get_settings
 from app.core.base import PlatformAdapter
+from app.infrastructure.tools.health_check import is_tool_available, resolve_tool_path
 from app.schemas.format import FormatInfo
 from app.schemas.metadata import MetadataResponse
 
@@ -20,6 +21,12 @@ settings = get_settings()
 
 class YouTubeAdapter(PlatformAdapter):
     """YouTube platform adapter using yt-dlp with robust error handling."""
+
+    FFMPEG_REQUIRED_MSG = (
+        "Selected format requires FFmpeg + FFprobe to merge video and audio. "
+        "Install FFmpeg and ensure both `ffmpeg` and `ffprobe` are available on PATH, "
+        "then retry. Windows: `winget install Gyan.FFmpeg`."
+    )
 
     def supports(self, url: str) -> bool:
         patterns = [
@@ -121,10 +128,13 @@ class YouTubeAdapter(PlatformAdapter):
         output_dir = os.path.abspath(settings.temp_dir)
         os.makedirs(output_dir, exist_ok=True)
 
-        ffmpeg_available = self._has_ffmpeg()
+        ffmpeg_path = resolve_tool_path("ffmpeg")
+        ffmpeg_available = ffmpeg_path is not None and resolve_tool_path("ffprobe") is not None
         candidates = self._build_format_candidates(format_id, quality, audio_only, ffmpeg_available)
         if not ffmpeg_available:
             logger.warning("ffmpeg not found, using non-merge download formats", url=url)
+            if format_id and not audio_only:
+                raise DownloadError(self.FFMPEG_REQUIRED_MSG)
 
         template_name = "%(id)s.%(ext)s"
         if output_suffix:
@@ -148,6 +158,8 @@ class YouTubeAdapter(PlatformAdapter):
                 "no_color": True,
                 "overwrites": True,
             }
+            if ffmpeg_path:
+                ydl_opts["ffmpeg_location"] = os.path.dirname(ffmpeg_path)
 
             if is_merge_format:
                 # Ensure yt-dlp muxes into a universally playable container.
@@ -179,7 +191,11 @@ class YouTubeAdapter(PlatformAdapter):
                         filename = f"{base}.mp3"
 
                 # Validate the output before returning
-                is_valid, error_msg = self._validate_output_file(filename)
+                is_valid, error_msg = self._validate_output_file(
+                    filename,
+                    require_video_stream=not audio_only,
+                    require_audio_stream=True,
+                )
                 if not is_valid:
                     logger.warning("Output validation failed, retrying", 
                                  format=fmt, attempt=attempt, error=error_msg, url=url)
@@ -224,11 +240,7 @@ class YouTubeAdapter(PlatformAdapter):
                     continue
                     
                 elif "postprocessor" in exc_str.lower() or "mux" in exc_str.lower() or "merge" in exc_str.lower():
-                    logger.warning("Postprocessor/mux error encountered, adding audio-only fallback")
-                    # For merge/postprocessor errors, add audio-only to candidates if not there
-                    if not audio_only and "bestaudio" not in fmt:
-                        # Add audio-only format to next attempt
-                        candidates.append("bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio")
+                    logger.warning("Postprocessor/mux error encountered, trying next video candidate")
                     continue
                     
                 else:
@@ -282,38 +294,59 @@ class YouTubeAdapter(PlatformAdapter):
                 # Force merge of selected video format with best available audio so the
                 # output is always playable (many YouTube format_ids are video-only).
                 candidates = [
-                    f"{format_id}+bestaudio/best",
-                    "bestvideo+bestaudio/best",
+                    f"{format_id}+bestaudio[ext=m4a]/bestaudio/best",
+                    "bestvideo+bestaudio[ext=m4a]/bestaudio/best",
                     "best",
                 ]
             else:
                 # No ffmpeg available – fall back to progressive formats that carry audio.
-                candidates = ["best[ext=mp4][acodec!=none]/best[acodec!=none]/best"]
+                candidates = [
+                    "best[ext=mp4][acodec^=mp4a][vcodec!=none]",
+                    "best[ext=mp4][acodec!=none][vcodec!=none]",
+                ]
         elif quality == "best":
             if ffmpeg_available:
-                candidates = ["bestvideo+bestaudio/best", "best"]
+                candidates = ["bestvideo+bestaudio[ext=m4a]/bestaudio/best", "best"]
             else:
-                candidates = ["best[ext=mp4][acodec!=none]/best[acodec!=none]/best"]
+                candidates = [
+                    "best[ext=mp4][acodec^=mp4a][vcodec!=none]",
+                    "best[ext=mp4][acodec!=none][vcodec!=none]",
+                ]
         elif quality == "worst":
             if ffmpeg_available:
-                candidates = ["worstvideo+worstaudio/worst", "worst"]
+                candidates = ["worstvideo+worstaudio[ext=m4a]/worstaudio/worst", "worst"]
             else:
-                candidates = ["worst[ext=mp4][acodec!=none]/worst[acodec!=none]/best[acodec!=none]/best"]
+                candidates = [
+                    "worst[ext=mp4][acodec^=mp4a][vcodec!=none]",
+                    "worst[ext=mp4][acodec!=none][vcodec!=none]",
+                    "best[ext=mp4][acodec^=mp4a][vcodec!=none]",
+                ]
         else:
+            height = int(quality)
             if ffmpeg_available:
                 candidates = [
-                    f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]",
-                    "bestvideo+bestaudio/best",
+                    f"bestvideo[height<={height}]+bestaudio[ext=m4a]/bestaudio/best[height<={height}]",
+                    f"best[height<={height}][acodec!=none]/best[height<={height}]",
+                    "best[acodec!=none]/best",
                     "best",
                 ]
             else:
                 candidates = [
-                    f"best[height<={quality}][ext=mp4][acodec!=none]/best[height<={quality}][acodec!=none]/best[ext=mp4][acodec!=none]/best[acodec!=none]/best",
+                    f"best[height<={height}][ext=mp4][acodec^=mp4a][vcodec!=none]",
+                    f"best[height<={height}][ext=mp4][acodec!=none][vcodec!=none]",
+                    "best[ext=mp4][acodec^=mp4a][vcodec!=none]",
+                    "best[ext=mp4][acodec!=none][vcodec!=none]",
                 ]
 
         return list(dict.fromkeys(candidates))
 
-    def _validate_output_file(self, filepath: str, min_size_kb: int = 100) -> tuple[bool, str]:
+    def _validate_output_file(
+        self,
+        filepath: str,
+        min_size_kb: int = 100,
+        require_video_stream: bool = False,
+        require_audio_stream: bool = False,
+    ) -> tuple[bool, str]:
         """
         Validate that downloaded file exists and has reasonable size and structure.
         Returns: (is_valid, error_message)
@@ -329,10 +362,11 @@ class YouTubeAdapter(PlatformAdapter):
                 return False, f"File too small ({file_size} bytes, expected at least {min_bytes} bytes)"
             
             # Try ffprobe validation if available (checks container/codecs)
-            if shutil.which("ffprobe"):
+            ffprobe_path = resolve_tool_path("ffprobe")
+            if ffprobe_path:
                 try:
                     result = subprocess.run(
-                        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", 
+                        [ffprobe_path, "-v", "error", "-show_entries", "stream=codec_type", 
                          "-of", "default=noprint_wrappers=1", filepath],
                         capture_output=True,
                         text=True,
@@ -346,6 +380,16 @@ class YouTubeAdapter(PlatformAdapter):
                     
                     if "codec_type=" not in result.stdout:
                         return False, "No valid streams in output (possibly corrupted)"
+
+                    stream_types = {
+                        line.split("=", 1)[1].strip()
+                        for line in result.stdout.splitlines()
+                        if line.startswith("codec_type=") and "=" in line
+                    }
+                    if require_video_stream and "video" not in stream_types:
+                        return False, "Output missing video stream"
+                    if require_audio_stream and "audio" not in stream_types:
+                        return False, "Output missing audio stream"
                     
                 except subprocess.TimeoutExpired:
                     logger.warning("ffprobe validation timeout", filepath=filepath)
@@ -369,7 +413,7 @@ class YouTubeAdapter(PlatformAdapter):
             logger.warning("Failed to cleanup partial file", filepath=filepath, error=str(e))
 
     def _has_ffmpeg(self) -> bool:
-        return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+        return is_tool_available("ffmpeg") and is_tool_available("ffprobe")
 
     def _clean_error(self, message: str) -> str:
         return re.sub(r"\x1b\[[0-9;]*m", "", message)
