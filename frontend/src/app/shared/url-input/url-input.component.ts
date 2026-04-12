@@ -23,12 +23,11 @@ import { CommonModule } from '@angular/common';
           (click)="submit()"
           [disabled]="!url.trim()"
         >
-          <span *ngIf="!loading">Download ↓</span>
+          <span *ngIf="!loading">Download</span>
           <span *ngIf="loading" class="loading-spinner-inline"></span>
         </button>
       </div>
       <p *ngIf="error" class="url-input-error text-error mt-1">{{ error }}</p>
-      <p *ngIf="success" class="url-input-success mt-1">✨ {{ success }}</p>
     </div>
   `,
   styles: [`
@@ -148,7 +147,6 @@ export class UrlInputComponent implements OnInit {
 
   url = '';
   error = '';
-  success = '';
   loading = false;
 
   ngOnInit(): void {
@@ -159,7 +157,6 @@ export class UrlInputComponent implements OnInit {
     const trimmed = this.url.trim();
     if (!trimmed) {
       this.error = 'Please enter a video URL';
-      this.success = '';
       setTimeout(() => this.error = '', 3000);
       return;
     }
@@ -167,19 +164,16 @@ export class UrlInputComponent implements OnInit {
     // Basic URL validation
     if (!this.isValidUrl(trimmed)) {
       this.error = 'Please enter a valid YouTube or Instagram URL';
-      this.success = '';
       setTimeout(() => this.error = '', 3000);
       return;
     }
 
     this.error = '';
-    this.success = 'Processing your video...';
     this.loading = true;
     
     setTimeout(() => {
       this.urlSubmitted.emit(trimmed);
       this.loading = false;
-      this.success = '';
     }, 500);
   }
 

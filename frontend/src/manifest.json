@@ -1,0 +1,17 @@
+{
+  "name": "YT Download",
+  "short_name": "YT Download",
+  "description": "Simple video downloader",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f4ed",
+  "theme_color": "#c96442",
+  "icons": [
+    {
+      "src": "assets/icons/site-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -40,7 +40,7 @@ import { UrlInputComponent } from '../../shared/url-input/url-input.component';
 
         <!-- Error state -->
         <div *ngIf="metadataError" class="card error-state">
-          <div class="error-header">⚠️ Error</div>
+          <div class="error-header">Error</div>
           <p class="error-message">{{ metadataError }}</p>
         </div>
 
@@ -57,10 +57,10 @@ import { UrlInputComponent } from '../../shared/url-input/url-input.component';
               <h2 class="video-title">{{ metadata.title }}</h2>
               <div class="video-meta-row">
                 <span *ngIf="metadata.uploader" class="meta-item">
-                  👤 {{ metadata.uploader }}
+                    {{ metadata.uploader }}
                 </span>
                 <span *ngIf="metadata.duration" class="meta-item">
-                  ⏱️ {{ formatDuration(metadata.duration) }}
+                    {{ formatDuration(metadata.duration) }}
                 </span>
                 <span class="platform-badge" [ngClass]="'platform-' + metadata.platform">
                   {{ metadata.platform | titlecase }}
@@ -80,14 +80,14 @@ import { UrlInputComponent } from '../../shared/url-input/url-input.component';
             <div class="option-type">
               <label class="checkbox-label">
                 <input type="checkbox" [(ngModel)]="audioOnly" class="checkbox-input" />
-                <span class="checkbox-text">🎵 Audio Only (MP3)</span>
+                <span class="checkbox-text">Audio Only (MP3)</span>
               </label>
             </div>
 
             <div *ngIf="canSelectSpecificFormat() && getVideoFormats().length > 0" class="quality-selector">
               <label class="quality-label">Video Quality:</label>
               <select [(ngModel)]="selectedFormatId" class="quality-select">
-                <option value="">🎯 Best Available</option>
+                <option value="">Best Available</option>
                 <option
                   *ngFor="let fmt of getVideoFormats()"
                   [value]="fmt.format_id"
@@ -112,7 +112,7 @@ import { UrlInputComponent } from '../../shared/url-input/url-input.component';
               (click)="startDownload()"
               [disabled]="isDownloading"
             >
-              <span *ngIf="!isDownloading">📥 Download Now</span>
+              <span *ngIf="!isDownloading">Download</span>
               <span *ngIf="isDownloading" class="download-loading">
                 <span class="loading-spinner-inline"></span>
                 Preparing...
@@ -141,18 +141,18 @@ import { UrlInputComponent } from '../../shared/url-input/url-input.component';
           </p>
 
           <div *ngIf="currentJob.status === 'completed'" class="completion-section">
-            <div class="success-message">✨ Download Complete!</div>
+            <div class="success-message">Download complete</div>
             <a
               [href]="getStreamUrl(currentJob.job_id)"
               class="btn btn-brand"
               download
             >
-              💾 Save Your File
+              Save file
             </a>
           </div>
 
           <div *ngIf="currentJob.status === 'failed'" class="failure-section">
-            <p class="failure-message">❌ Download failed: {{ currentJob.error }}</p>
+            <p class="failure-message">Download failed: {{ currentJob.error }}</p>
           </div>
         </div>
       </div>

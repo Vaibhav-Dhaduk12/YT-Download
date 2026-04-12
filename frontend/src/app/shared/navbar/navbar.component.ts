@@ -10,22 +10,21 @@ import { CommonModule } from '@angular/common';
     <nav class="navbar">
       <div class="container navbar-container">
         <a routerLink="/" class="navbar-brand">
-          <span class="navbar-logo">▶</span>
-          <span class="navbar-name">YT Download Studio</span>
+          <img src="assets/icons/site-icon.svg" alt="YT Download" class="navbar-logo" />
+          <span class="navbar-name">YT Download</span>
         </a>
         <ul class="navbar-links">
           <li>
             <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" class="nav-link">
-              🏠 Home
+              Home
             </a>
           </li>
           <li>
             <a routerLink="/download" routerLinkActive="active" class="nav-link">
-              📥 Download
+              Download
             </a>
           </li>
         </ul>
-        <a href="#" class="btn btn-brand btn-sm">Get Started</a>
       </div>
     </nav>
   `,
@@ -66,16 +65,13 @@ import { CommonModule } from '@angular/common';
     }
 
     .navbar-logo {
-      font-size: 1.5rem;
-      color: var(--claude-terracotta);
-      animation: pulse-terracotta 2s ease-in-out infinite;
+      width: 28px;
+      height: 28px;
+      flex-shrink: 0;
     }
 
     .navbar-name {
-      background: linear-gradient(135deg, var(--claude-terracotta), var(--claude-coral));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+      color: var(--claude-near-black);
     }
 
     .navbar-links {
@@ -95,7 +91,7 @@ import { CommonModule } from '@angular/common';
         transition: all 0.3s ease;
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0;
 
         &:hover {
           color: var(--claude-near-black);
@@ -107,21 +103,6 @@ import { CommonModule } from '@angular/common';
           background: var(--claude-warm-sand);
           font-weight: 600;
         }
-      }
-    }
-
-    .btn-sm {
-      padding: 0.625rem 1rem;
-      font-size: 14px;
-      white-space: nowrap;
-    }
-
-    @keyframes pulse-terracotta {
-      0%, 100% {
-        opacity: 1;
-      }
-      50% {
-        opacity: 0.7;
       }
     }
 
