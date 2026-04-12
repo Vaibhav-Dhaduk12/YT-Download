@@ -1,8 +1,10 @@
 import asyncio
+import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 from typing import Any, Callable, Optional
 
 import structlog
@@ -109,6 +111,8 @@ class YouTubeAdapter(PlatformAdapter):
         cookiefile = self._cookiefile_path()
         if cookiefile:
             ydl_opts["cookiefile"] = cookiefile
+
+        # 1) Preferred full extraction path.
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 return ydl.extract_info(url, download=False) or {}
@@ -116,7 +120,25 @@ class YouTubeAdapter(PlatformAdapter):
                 if "Requested format is not available" not in str(exc):
                     raise
 
+        # 2) Retry with processing disabled to avoid strict format resolution.
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                return ydl.extract_info(url, download=False, process=False) or {}
+            except yt_dlp.utils.DownloadError:
+                pass
+
+        # 3) Last fallback: ignore format availability errors and use a broader
+        #    client combination that tends to work better on some hosted IPs.
+        fallback_opts = {
+            **ydl_opts,
+            "ignore_no_formats_error": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "web"],
+                }
+            },
+        }
+        with yt_dlp.YoutubeDL(fallback_opts) as ydl:
             return ydl.extract_info(url, download=False, process=False) or {}
 
     def _do_download(
@@ -423,8 +445,73 @@ class YouTubeAdapter(PlatformAdapter):
 
     def _cookiefile_path(self) -> Optional[str]:
         cookiefile = (settings.ytdlp_cookiefile or "").strip()
-        if cookiefile and os.path.exists(cookiefile):
+        if not cookiefile:
+            return None
+
+        if not os.path.exists(cookiefile):
+            logger.warning("Configured yt-dlp cookie file does not exist", cookiefile=cookiefile)
+            return None
+
+        try:
+            with open(cookiefile, "r", encoding="utf-8") as fh:
+                first_nonempty = ""
+                for line in fh:
+                    stripped = line.strip()
+                    if stripped:
+                        first_nonempty = stripped
+                        break
+
+            if first_nonempty.startswith("[") or first_nonempty.startswith("{"):
+                converted = self._convert_json_cookiefile(cookiefile)
+                if converted:
+                    logger.info("Converted JSON cookie file for yt-dlp", source=cookiefile)
+                    return converted
+
             return cookiefile
+        except Exception as exc:
+            logger.warning("Unable to read configured yt-dlp cookie file", error=str(exc))
+            return None
+
+    def _convert_json_cookiefile(self, source_path: str) -> Optional[str]:
+        try:
+            with open(source_path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+
+            if isinstance(raw, list):
+                cookies = [item for item in raw if isinstance(item, dict)]
+            elif isinstance(raw, dict) and isinstance(raw.get("cookies"), list):
+                cookies = [item for item in raw["cookies"] if isinstance(item, dict)]
+            else:
+                logger.warning("JSON cookie file has unsupported structure")
+                return None
+
+            target_path = os.path.join(tempfile.gettempdir(), "ytdlp-cookies.txt")
+            with open(target_path, "w", encoding="utf-8", newline="\n") as out:
+                out.write("# Netscape HTTP Cookie File\n")
+                for cookie in cookies:
+                    domain = str(cookie.get("domain") or "").strip()
+                    if not domain:
+                        continue
+                    original_domain = domain
+                    if cookie.get("httpOnly"):
+                        domain = f"#HttpOnly_{domain}"
+                    include_subdomains = "TRUE" if original_domain.startswith(".") else "FALSE"
+                    path = str(cookie.get("path") or "/")
+                    secure = "TRUE" if cookie.get("secure") else "FALSE"
+                    expires = str(int(cookie.get("expirationDate") or 0))
+                    name = str(cookie.get("name") or "")
+                    value = str(cookie.get("value") or "")
+                    out.write(
+                        "\t".join(
+                            [domain, include_subdomains, path, secure, expires, name, value]
+                        )
+                        + "\n"
+                    )
+
+            return target_path
+        except Exception as exc:
+            logger.warning("Failed to convert JSON cookie file for yt-dlp", error=str(exc))
+            return None
         return None
 
     def _clean_error(self, message: str) -> str:

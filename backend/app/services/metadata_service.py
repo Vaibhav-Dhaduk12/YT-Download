@@ -38,6 +38,13 @@ class MetadataService:
                     "a backend setup with YouTube cookies configured for yt-dlp."
                 ) from exc
 
+            if "requested format is not available" in lowered:
+                raise MetadataFetchError(
+                    "YouTube did not return usable formats for this video from the current "
+                    "backend environment. Try again later, try another video, or use an "
+                    "authenticated cookie setup for yt-dlp."
+                ) from exc
+
             raise MetadataFetchError("Unable to fetch metadata for this URL.") from exc
 
         self._cache[url] = metadata
