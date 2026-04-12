@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     download_timeout: int = 300
     ffmpeg_path: str = ""
     ffprobe_path: str = ""
+    ytdlp_cookiefile: str = ""
 
     # Logging
     log_level: str = "INFO"

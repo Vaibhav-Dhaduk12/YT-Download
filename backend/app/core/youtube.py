@@ -106,6 +106,9 @@ class YouTubeAdapter(PlatformAdapter):
             "extract_flat": False,
             "ignoreconfig": True,
         }
+        cookiefile = self._cookiefile_path()
+        if cookiefile:
+            ydl_opts["cookiefile"] = cookiefile
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 return ydl.extract_info(url, download=False) or {}
@@ -160,6 +163,9 @@ class YouTubeAdapter(PlatformAdapter):
             }
             if ffmpeg_path:
                 ydl_opts["ffmpeg_location"] = os.path.dirname(ffmpeg_path)
+            cookiefile = self._cookiefile_path()
+            if cookiefile:
+                ydl_opts["cookiefile"] = cookiefile
 
             if is_merge_format:
                 # Ensure yt-dlp muxes into a universally playable container.
@@ -414,6 +420,12 @@ class YouTubeAdapter(PlatformAdapter):
 
     def _has_ffmpeg(self) -> bool:
         return is_tool_available("ffmpeg") and is_tool_available("ffprobe")
+
+    def _cookiefile_path(self) -> Optional[str]:
+        cookiefile = (settings.ytdlp_cookiefile or "").strip()
+        if cookiefile and os.path.exists(cookiefile):
+            return cookiefile
+        return None
 
     def _clean_error(self, message: str) -> str:
         return re.sub(r"\x1b\[[0-9;]*m", "", message)
