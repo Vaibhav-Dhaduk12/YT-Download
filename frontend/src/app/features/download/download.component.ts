@@ -538,6 +538,10 @@ import { UrlInputComponent } from '../../shared/url-input/url-input.component';
         font-size: 28px;
       }
 
+      .download-subtitle {
+        font-size: 14px;
+      }
+
       .download-header {
         margin-bottom: 2rem;
       }
@@ -556,8 +560,61 @@ import { UrlInputComponent } from '../../shared/url-input/url-input.component';
         padding: 1.5rem;
       }
 
+      .progress-card {
+        padding: 1.5rem;
+      }
+
+      .progress-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.4rem;
+      }
+
+      .progress-percentage {
+        font-size: 20px;
+      }
+
       .quality-selector {
         margin-bottom: 1rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .download-section {
+        padding: 1rem 0;
+      }
+
+      .download-title {
+        font-size: 24px;
+      }
+
+      .download-input-card,
+      .metadata-card,
+      .progress-card,
+      .error-state,
+      .loading-state {
+        padding: 1rem;
+      }
+
+      .video-title {
+        font-size: 18px;
+      }
+
+      .video-meta-row {
+        gap: 0.5rem;
+      }
+
+      .meta-item {
+        font-size: 13px;
+      }
+
+      .options-title,
+      .progress-header h3 {
+        font-size: 16px;
+      }
+
+      .btn-download {
+        padding: 0.875rem 1rem;
       }
     }
   `],

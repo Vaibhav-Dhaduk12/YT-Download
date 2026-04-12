@@ -128,13 +128,18 @@ import { CommonModule } from '@angular/common';
     }
 
     @media (max-width: 640px) {
+      .url-input-group {
+        flex-direction: column;
+      }
+
       .url-input {
         padding: 0.875rem 1rem;
         font-size: 14px;
       }
 
       .url-input-btn {
-        min-width: 100px;
+        width: 100%;
+        min-width: 0;
         padding: 0.75rem 1rem;
       }
     }

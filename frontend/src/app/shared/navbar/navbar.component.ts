@@ -108,15 +108,52 @@ import { CommonModule } from '@angular/common';
 
     @media (max-width: 768px) {
       .navbar-container {
-        gap: 1rem;
+        gap: 0.75rem;
       }
 
-      .navbar-links {
-        display: none;
+      .navbar {
+        padding: 0.75rem 0;
       }
 
       .navbar-brand {
-        flex: 1;
+        font-size: 1.05rem;
+        gap: 0.5rem;
+      }
+
+      .navbar-logo {
+        width: 24px;
+        height: 24px;
+      }
+
+      .navbar-links {
+        display: flex;
+        gap: 0.25rem;
+
+        .nav-link {
+          font-size: 13px;
+          padding: 0.5rem 0.625rem;
+        }
+      }
+
+      .navbar-name {
+        max-width: 110px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .navbar-name {
+        max-width: 90px;
+      }
+
+      .navbar-links .nav-link {
+        padding: 0.45rem 0.5rem;
+      }
+
+      .navbar-links {
+        gap: 0.2rem;
       }
     }
   `],

@@ -57,6 +57,10 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+body {
+  overflow-x: hidden;
+}
+
 /* Typography System */
 h1, h2, h3, h4, h5, h6 {
   font-family: 'Lora', Georgia, serif;
@@ -309,5 +313,19 @@ input, textarea, select {
   .btn {
     padding: 0.625rem 1rem;
     font-size: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  h1 { font-size: 30px; }
+  h2 { font-size: 26px; }
+  h3 { font-size: 22px; }
+
+  .container {
+    padding: 0 0.75rem;
+  }
+
+  .card {
+    padding: 1rem;
   }
 }
