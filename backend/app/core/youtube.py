@@ -151,7 +151,12 @@ class YouTubeAdapter(PlatformAdapter):
 
     def _map_metadata_error(self, message: str) -> str:
         lowered = message.lower()
-        if "sign in to confirm" in lowered and "not a bot" in lowered:
+        if (
+            ("sign in to confirm" in lowered and "not a bot" in lowered)
+            or "cookies-from-browser" in lowered
+            or "use --cookies" in lowered
+            or "authentication" in lowered
+        ):
             return (
                 "YouTube is blocking metadata retrieval for this video from server IP "
                 "(anti-bot challenge). Please try another video, try again later, or use "
@@ -162,6 +167,12 @@ class YouTubeAdapter(PlatformAdapter):
                 "YouTube did not return usable formats for this video from the current "
                 "backend environment. Try again later, try another video, or use an "
                 "authenticated cookie setup for yt-dlp."
+            )
+        if "[youtube]" in lowered:
+            return (
+                "YouTube metadata extraction failed for this video in the current backend "
+                "environment. Try another video, try again later, or use an authenticated "
+                "cookie setup for yt-dlp."
             )
         return "Unable to fetch metadata for this URL."
 

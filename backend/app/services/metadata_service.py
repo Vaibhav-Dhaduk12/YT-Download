@@ -47,6 +47,13 @@ class MetadataService:
                     "authenticated cookie setup for yt-dlp."
                 ) from exc
 
+            if "[youtube]" in lowered or "cookies-from-browser" in lowered:
+                raise MetadataFetchError(
+                    "YouTube metadata extraction failed in the current backend environment. "
+                    "Try another video, try again later, or use an authenticated cookie setup "
+                    "for yt-dlp."
+                ) from exc
+
             raise MetadataFetchError("Unable to fetch metadata for this URL.") from exc
 
         self._cache[url] = metadata
