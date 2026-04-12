@@ -111,20 +111,23 @@ class YouTubeAdapter(PlatformAdapter):
         cookiefile = self._cookiefile_path()
         if cookiefile:
             ydl_opts["cookiefile"] = cookiefile
+        user_agent = (settings.ytdlp_user_agent or "").strip()
+        if user_agent:
+            ydl_opts["user_agent"] = user_agent
         last_exc: Optional[Exception] = None
 
         # 1) Preferred full extraction path.
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 return ydl.extract_info(url, download=False) or {}
-            except yt_dlp.utils.DownloadError as exc:
+            except Exception as exc:
                 last_exc = exc
 
         # 2) Retry with processing disabled to avoid strict format resolution.
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 return ydl.extract_info(url, download=False, process=False) or {}
-            except yt_dlp.utils.DownloadError as exc:
+            except Exception as exc:
                 last_exc = exc
 
         # 3) Last fallback: ignore format availability errors and use a broader
@@ -141,11 +144,12 @@ class YouTubeAdapter(PlatformAdapter):
         with yt_dlp.YoutubeDL(fallback_opts) as ydl:
             try:
                 return ydl.extract_info(url, download=False, process=False) or {}
-            except yt_dlp.utils.DownloadError as exc:
+            except Exception as exc:
                 last_exc = exc
 
         if last_exc is not None:
-            raise MetadataFetchError(self._map_metadata_error(str(last_exc))) from last_exc
+            text = str(last_exc) or repr(last_exc)
+            raise MetadataFetchError(self._map_metadata_error(text)) from last_exc
 
         raise MetadataFetchError("Unable to fetch metadata for this URL.")
 
@@ -223,6 +227,9 @@ class YouTubeAdapter(PlatformAdapter):
             cookiefile = self._cookiefile_path()
             if cookiefile:
                 ydl_opts["cookiefile"] = cookiefile
+            user_agent = (settings.ytdlp_user_agent or "").strip()
+            if user_agent:
+                ydl_opts["user_agent"] = user_agent
 
             if is_merge_format:
                 # Ensure yt-dlp muxes into a universally playable container.

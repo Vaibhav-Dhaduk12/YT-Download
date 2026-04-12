@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     ffmpeg_path: str = ""
     ffprobe_path: str = ""
     ytdlp_cookiefile: str = ""
+    ytdlp_user_agent: str = ""
 
     # Logging
     log_level: str = "INFO"
